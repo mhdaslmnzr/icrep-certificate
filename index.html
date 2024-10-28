@@ -179,7 +179,7 @@
     <script>
         let templateImage = null;
         const fonts = {
-            normal: '80px Poppins',
+            normal: '400 80px Poppins',
             bold: '600 80px Poppins'
         };
 
@@ -273,6 +273,9 @@
         async function generateCertificates(data) {
             const zip = new JSZip();
             const total = data.length;
+            
+            // Create a map to store filename counts
+            const filenameMap = new Map();
 
             for (let i = 0; i < total; i++) {
                 const row = data[i];
@@ -292,15 +295,33 @@
                 const text = generateCertificateText(row);
                 await drawJustifiedText(ctx, text, 400, 1249, 3200);
 
-                // Generate safe filename
-                const safeName = row.Name.toString()
+                // Generate base filename
+                let baseName = row.Name.toString()
                     .replace(/[^a-z0-9]/gi, '_')
                     .replace(/_+/g, '_')
                     .replace(/^_|_$/g, '')
                     .toLowerCase();
 
-                // Add to zip with safe filename
-                const filename = safeName ? `certificate_${safeName}.jpg` : `certificate_${i + 1}.jpg`;
+                // Add event/achievement to filename for better distinction
+                const eventSuffix = row.Event.toString()
+                    .replace(/[^a-z0-9]/gi, '_')
+                    .replace(/_+/g, '_')
+                    .replace(/^_|_$/g, '')
+                    .toLowerCase();
+
+                baseName = `${baseName}_${eventSuffix}`;
+
+                // Get current count for this filename
+                let count = filenameMap.get(baseName) || 0;
+                count++;
+                filenameMap.set(baseName, count);
+
+                // Generate final filename with number if it's a duplicate
+                const filename = count > 1 
+                    ? `certificate_${baseName}_${count}.jpg`
+                    : `certificate_${baseName}.jpg`;
+
+                // Add to zip
                 const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg'));
                 zip.file(filename, blob);
 
@@ -315,7 +336,7 @@
 
         function generateCertificateText(row) {
             try {
-                const date = formatDate(row.Date);
+                const dateText = formatDate(row.Date);
                 return [
                     { text: "This is to certify that ", bold: false },
                     { text: `${row.Salutation || ''} `, bold: true },
@@ -329,7 +350,7 @@
                     { text: "in connection with ", bold: false },
                     { text: `${row.Event || ''} `, bold: true },
                     { text: "held on ", bold: false },
-                    { text: date, bold: false }
+                    { text: dateText, bold: true }
                 ];
             } catch (err) {
                 throw new Error(`Error generating certificate text: ${err.message}`);
@@ -397,20 +418,45 @@
             });
         }
 
+        
         function formatDate(dateStr) {
             try {
-                const date = new Date(dateStr);
-                if (isNaN(date.getTime())) {
-                    throw new Error('Invalid date');
+                // If the input is not a date format, return it as-is
+                if (!dateStr.includes('-')) {
+                    return dateStr;
                 }
-                const day = date.getDate();
-                const month = date.toLocaleString('default', { month: 'long' });
-                const year = date.getFullYear();
+
+                // Check if the input matches the 'DD-MM-YYYY' format using regex
+                const regex = /^(\d{2})-(\d{2})-(\d{4})$/;
+                const match = dateStr.match(regex);
+                if (!match) {
+                    return dateStr; // Return original string if not a date
+                }
+
+                // Extract day, month, and year from the regex match
+                const day = parseInt(match[1], 10);
+                const month = parseInt(match[2], 10) - 1; // Months are 0-indexed in JavaScript
+                const year = parseInt(match[3], 10);
+
+                // Create a new Date object
+                const date = new Date(year, month, day);
+
+                // Validate the created date object
+                if (isNaN(date.getTime()) || date.getDate() !== day || date.getMonth() !== month || date.getFullYear() !== year) {
+                    return dateStr; // Return original string if invalid date
+                }
+
+                // Get the month name
+                const monthName = date.toLocaleString('default', { month: 'long' });
+
+                // Determine the ordinal suffix
+                const suffix = ['th', 'st', 'nd', 'rd'][(day % 10) > 3 ? 0 : (day % 100 - day % 10 !== 10) * (day % 10)];
                 
-                const suffix = ['th', 'st', 'nd', 'rd'][(day % 10) > 3 ? 0 : (day % 100 - day % 10 != 10) * (day % 10)];
-                return `${day}${suffix} ${month}, ${year}`;
+                // Return the formatted date
+                return `${day}${suffix} ${monthName}, ${year}`;
             } catch (err) {
-                throw new Error('Invalid date format');
+                console.error(`Error in formatDate: ${err.message}, input: "${dateStr}"`);
+                return dateStr; // Return original string in case of any error
             }
         }
 
