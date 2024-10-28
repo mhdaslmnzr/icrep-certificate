@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Certificate Generator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: "Poppins", serif;
+            font-weight: 400;
+            font-weight: 600;
+            font-style: normal;
+        }
+
+        body {
+            background: #f0f2f5;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            color: #1a1a1a;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+
+        .upload-section {
+            margin-bottom: 25px;
+            padding: 20px;
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .upload-section:hover {
+            border-color: #666;
+        }
+
+        .upload-section h2 {
+            margin-bottom: 15px;
+            color: #333;
+        }
+
+        .file-input {
+            display: none;
+        }
+
+        .upload-button {
+            background: #2563eb;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background 0.3s;
+        }
+
+        .upload-button:hover {
+            background: #1d4ed8;
+        }
+
+        .upload-button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .preview {
+            margin-top: 20px;
+            text-align: center;
+        }
+
+        .preview img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        #progress-container {
+            margin-top: 20px;
+            display: none;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #f0f0f0;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        .progress {
+            width: 0%;
+            height: 100%;
+            background: #2563eb;
+            transition: width 0.3s;
+        }
+
+        .status {
+            margin-top: 10px;
+            color: #666;
+        }
+
+        .error {
+            color: #dc2626;
+            margin-top: 10px;
+            padding: 10px;
+            background: #fee2e2;
+            border-radius: 6px;
+            display: none;
+        }
+
+        .csv-format {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f8fafc;
+            border-radius: 6px;
+        }
+
+        .csv-format h3 {
+            margin-bottom: 10px;
+            color: #334155;
+        }
+
+        .csv-format code {
+            display: block;
+            padding: 10px;
+            background: #f1f5f9;
+            border-radius: 4px;
+            font-family: monospace;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>ICREP Certificate Generator</h1>
+        
+        <div class="csv-format">
+            <h3>Required CSV Format:</h3>
+            <a href="/sample.csv" class="download-button" download>Download Sample CSV</a>
+        </div>
+
+        <div class="upload-section">
+            <h2>Upload CSV File</h2>
+            <input type="file" id="csvInput" class="file-input" accept=".csv">
+            <button class="upload-button" onclick="document.getElementById('csvInput').click()">
+                Choose CSV File
+            </button>
+        </div>
+
+        <div id="progress-container">
+            <div class="progress-bar">
+                <div class="progress" id="progress"></div>
+            </div>
+            <div class="status" id="status">Processing...</div>
+        </div>
+
+        <div class="error" id="error"></div>
+    </div>
+
+    <script>
+        let templateImage = null;
+        const fonts = {
+            normal: '80px Poppins',
+            bold: '600 80px Poppins'
+        };
+
+        // Load template image when page loads
+        window.addEventListener('load', async () => {
+            try {
+                templateImage = await loadTemplateImage();
+                console.log('Template loaded successfully');
+            } catch (err) {
+                showError('Error loading template image: ' + err.message);
+            }
+        });
+
+        async function loadTemplateImage() {
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => resolve(img);
+                img.onerror = () => reject(new Error('Failed to load cert.jpg. Make sure it exists in the root folder.'));
+                img.src = 'cert.jpg';
+            });
+        }
+
+        // Handle CSV upload
+        document.getElementById('csvInput').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            if (!templateImage) {
+                showError('Template image not loaded. Please ensure cert.jpg exists in the root folder.');
+                return;
+            }
+
+            try {
+                showProgress();
+                const data = await readCSVFile(file);
+                await generateCertificates(data);
+                hideProgress();
+            } catch (err) {
+                showError(err.message);
+                hideProgress();
+            }
+        });
+
+        async function readCSVFile(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const text = e.target.result;
+                        const rows = text.split('\n').map(row => row.trim()).filter(row => row);
+                        const headers = rows[0].split(',').map(header => header.trim());
+                        
+                        // Validate headers
+                        const requiredFields = ['Name', 'Salutation', 'Institution', 'Achievement', 'Program', 'Event', 'Date'];
+                        const missingFields = requiredFields.filter(field => !headers.includes(field));
+                        
+                        if (missingFields.length > 0) {
+                            reject(new Error(`Missing required columns: ${missingFields.join(', ')}`));
+                            return;
+                        }
+
+                        // Parse data rows
+                        const data = rows.slice(1).map(row => {
+                            const values = row.split(',').map(value => value.trim());
+                            const rowData = {};
+                            headers.forEach((header, index) => {
+                                rowData[header] = values[index] || '';
+                            });
+                            return rowData;
+                        });
+
+                        // Validate data
+                        const invalidRows = data.filter(row => 
+                            requiredFields.some(field => !row[field])
+                        );
+
+                        if (invalidRows.length > 0) {
+                            reject(new Error('Some rows are missing required fields'));
+                            return;
+                        }
+
+                        resolve(data);
+                    } catch (err) {
+                        reject(new Error('Error parsing CSV file: ' + err.message));
+                    }
+                };
+                reader.onerror = () => reject(new Error('Error reading file'));
+                reader.readAsText(file);
+            });
+        }
+
+        async function generateCertificates(data) {
+            const zip = new JSZip();
+            const total = data.length;
+
+            for (let i = 0; i < total; i++) {
+                const row = data[i];
+                const canvas = document.createElement('canvas');
+                canvas.width = templateImage.width;
+                canvas.height = templateImage.height;
+                const ctx = canvas.getContext('2d');
+
+                // Draw template
+                ctx.drawImage(templateImage, 0, 0);
+
+                // Configure text settings
+                ctx.fillStyle = 'black';
+                ctx.textBaseline = 'middle';
+
+                // Draw certificate text
+                const text = generateCertificateText(row);
+                await drawJustifiedText(ctx, text, 400, 1249, 3200);
+
+                // Generate safe filename
+                const safeName = row.Name.toString()
+                    .replace(/[^a-z0-9]/gi, '_')
+                    .replace(/_+/g, '_')
+                    .replace(/^_|_$/g, '')
+                    .toLowerCase();
+
+                // Add to zip with safe filename
+                const filename = safeName ? `certificate_${safeName}.jpg` : `certificate_${i + 1}.jpg`;
+                const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg'));
+                zip.file(filename, blob);
+
+                // Update progress
+                updateProgress(Math.round(((i + 1) / total) * 100));
+            }
+
+            // Download zip
+            const content = await zip.generateAsync({ type: 'blob' });
+            saveAs(content, 'certificates.zip');
+        }
+
+        function generateCertificateText(row) {
+            try {
+                const date = formatDate(row.Date);
+                return [
+                    { text: "This is to certify that ", bold: false },
+                    { text: `${row.Salutation || ''} `, bold: true },
+                    { text: `${row.Name || ''} `, bold: true },
+                    { text: "of ", bold: false },
+                    { text: `${row.Institution || ''} `, bold: true },
+                    { text: "has achieved ", bold: false },
+                    { text: `${row.Achievement || ''} `, bold: true },
+                    { text: "in ", bold: false },
+                    { text: `${row.Program || ''} `, bold: true },
+                    { text: "in connection with ", bold: false },
+                    { text: `${row.Event || ''} `, bold: true },
+                    { text: "held on ", bold: false },
+                    { text: date, bold: false }
+                ];
+            } catch (err) {
+                throw new Error(`Error generating certificate text: ${err.message}`);
+            }
+        }
+
+        async function drawJustifiedText(ctx, textSegments, x, y, maxWidth) {
+            let currentLine = [];
+            let currentWidth = 0;
+            const lines = [];
+
+            // Break into lines
+            for (const segment of textSegments) {
+                const words = segment.text.split(' ');
+                for (const word of words) {
+                    ctx.font = segment.bold ? fonts.bold : fonts.normal;
+                    const wordWidth = ctx.measureText(word).width;
+                    
+                    if (currentWidth + wordWidth <= maxWidth) {
+                        currentLine.push({ text: word, bold: segment.bold });
+                        currentWidth += wordWidth + ctx.measureText(' ').width;
+                    } else {
+                        lines.push(currentLine);
+                        currentLine = [{ text: word, bold: segment.bold }];
+                        currentWidth = wordWidth + ctx.measureText(' ').width;
+                    }
+                }
+            }
+            if (currentLine.length > 0) {
+                lines.push(currentLine);
+            }
+
+            // Draw lines
+            const lineHeight = 100;
+            lines.forEach((line, lineIndex) => {
+                const isLastLine = lineIndex === lines.length - 1;
+                
+                if (!isLastLine) {
+                    // Calculate spacing for justification
+                    const lineWidth = line.reduce((width, word) => {
+                        ctx.font = word.bold ? fonts.bold : fonts.normal;
+                        return width + ctx.measureText(word.text).width;
+                    }, 0);
+                    
+                    const spaceWidth = (maxWidth - lineWidth) / (line.length - 1);
+                    let currentX = x;
+
+                    // Draw justified line
+                    line.forEach((word, wordIndex) => {
+                        ctx.font = word.bold ? fonts.bold : fonts.normal;
+                        ctx.fillText(word.text, currentX, y + lineIndex * lineHeight);
+                        if (wordIndex < line.length - 1) {
+                            currentX += ctx.measureText(word.text).width + spaceWidth;
+                        }
+                    });
+                } else {
+                    // Last line - left aligned
+                    let currentX = x;
+                    line.forEach(word => {
+                        ctx.font = word.bold ? fonts.bold : fonts.normal;
+                        ctx.fillText(word.text, currentX, y + lineIndex * lineHeight);
+                        currentX += ctx.measureText(word.text + ' ').width;
+                    });
+                }
+            });
+        }
+
+        function formatDate(dateStr) {
+            try {
+                const date = new Date(dateStr);
+                if (isNaN(date.getTime())) {
+                    throw new Error('Invalid date');
+                }
+                const day = date.getDate();
+                const month = date.toLocaleString('default', { month: 'long' });
+                const year = date.getFullYear();
+                
+                const suffix = ['th', 'st', 'nd', 'rd'][(day % 10) > 3 ? 0 : (day % 100 - day % 10 != 10) * (day % 10)];
+                return `${day}${suffix} ${month}, ${year}`;
+            } catch (err) {
+                throw new Error('Invalid date format');
+            }
+        }
+
+        function showProgress() {
+            document.getElementById('progress-container').style.display = 'block';
+            document.getElementById('error').style.display = 'none';
+        }
+
+        function hideProgress() {
+            document.getElementById('progress-container').style.display = 'none';
+        }
+
+        function updateProgress(percent) {
+            document.getElementById('progress').style.width = `${percent}%`;
+            document.getElementById('status').textContent = `Processing... ${percent}%`;
+        }
+
+        function showError(message) {
+            const error = document.getElementById('error');
+            error.textContent = `Error: ${message}`;
+            error.style.display = 'block';
+        }
+    </script>
+</body>
+</html>
